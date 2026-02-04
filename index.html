@@ -1,1 +1,293 @@
-Hello World
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hello World — Whirlwind</title>
+  <style>
+    :root{
+      --bg:#07060a;
+      --fg:#f6f7f9;
+    }
+
+    html,body{
+      height:100%;
+      margin:0;
+      background: radial-gradient(1200px 800px at 10% 20%, #0b1020 0%, var(--bg) 35%, #020205 100%);
+      color:var(--fg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      overflow:hidden;
+    }
+
+    /* simple centered message shown immediately */
+    #message{
+      position:fixed;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      font-size:clamp(28px,6vw,84px);
+      letter-spacing:0.02em;
+      font-weight:600;
+      color: linear-gradient(90deg,#fff,#ddd); /* fallback */
+      text-align:center;
+      z-index:2;
+      pointer-events:none;
+      transition:opacity 1s ease, transform 1s ease;
+      text-shadow:
+        0 6px 20px rgba(2,3,9,0.65),
+        0 1px 1px rgba(255,255,255,0.02);
+    }
+
+    /* faint the message while animation runs */
+    #message.faint{
+      opacity:0.08;
+      transform:translate(-50%,-50%) scale(0.9);
+    }
+
+    /* particle letters */
+    .whirl-letter{
+      position:fixed;
+      left:0;
+      top:0;
+      transform-origin:center center;
+      will-change:transform, opacity, filter;
+      pointer-events:none;
+      user-select:none;
+      mix-blend-mode:screen;
+      text-shadow:
+        0 2px 8px rgba(0,0,0,0.45),
+        0 1px 0 rgba(255,255,255,0.03);
+    }
+
+    /* subtle visual flourish: glow rings */
+    .vignette{
+      position:fixed;
+      inset:0;
+      background:
+        radial-gradient(60% 40% at 20% 30%, rgba(80,120,255,0.06), transparent 10%),
+        radial-gradient(50% 35% at 80% 80%, rgba(255,140,200,0.04), transparent 12%);
+      pointer-events:none;
+      z-index:1;
+    }
+
+    /* respect prefers-reduced-motion */
+    @media (prefers-reduced-motion: reduce){
+      .whirl-letter{ transition:none !important; animation:none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="message">Hello World</div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <script>
+  (function(){
+    // Only letters taken from the words "hello world" (no spaces or other characters).
+    const LETTERS = 'helloworld'; // letters allowed (repeats allowed)
+    const idleDelay = 5000; // ms of inactivity before animation begins
+    let idleTimer = null;
+    let animating = false;
+    let particles = [];
+    let rafId = null;
+    const message = document.getElementById('message');
+
+    // Respect reduce-motion
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Activity reset listeners
+    const activityEvents = ['mousemove','mousedown','keydown','touchstart','scroll'];
+    activityEvents.forEach(e => window.addEventListener(e, resetIdle, {passive:true}));
+
+    // Start initial idle countdown
+    resetIdle();
+
+    function resetIdle(){
+      if (idleTimer) clearTimeout(idleTimer);
+      // if animating, stop as soon as user interacts
+      if (animating){
+        stopAnimation();
+      }
+      idleTimer = setTimeout(() => {
+        startAnimation();
+      }, idleDelay);
+    }
+
+    function startAnimation(){
+      if (reduced) return; // do nothing if user prefers reduced motion
+      animating = true;
+      message.classList.add('faint');
+      buildParticles();
+      lastTime = performance.now();
+      rafId = requestAnimationFrame(frame);
+    }
+
+    function stopAnimation(){
+      animating = false;
+      message.classList.remove('faint');
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+      particles.forEach(p => p.el.remove());
+      particles = [];
+    }
+
+    // Build a number of particle elements sized to viewport
+    function buildParticles(){
+      const vw = Math.max(window.innerWidth, 320);
+      const vh = Math.max(window.innerHeight, 240);
+      // density: larger viewports create more letters; clamp for performance
+      const area = vw * vh;
+      let count = Math.round(area / 4500); // tune density
+      count = Math.max(90, Math.min(420, count));
+
+      const cx = vw/2;
+      const cy = vh/2;
+
+      for(let i=0;i<count;i++){
+        const el = document.createElement('span');
+        el.className = 'whirl-letter';
+        el.textContent = LETTERS.charAt(Math.floor(Math.random()*LETTERS.length));
+        // random font size
+        const size = (Math.random()*1.6 + 0.6) * (Math.min(vw, vh)/40);
+        el.style.fontSize = `${size}px`;
+        // color — HSL based on index to make a soft palette
+        const hue = (200 + Math.random()*120) % 360;
+        const sat = 60 + Math.random()*20;
+        const light = 60 + Math.random()*8;
+        el.style.color = `hsl(${hue} ${sat}% ${light}%)`;
+        el.style.opacity = (0.5 + Math.random()*0.6).toFixed(2);
+        el.style.zIndex = 5 + Math.floor(Math.random()*10);
+
+        // initial invisible placement at center to bloom out
+        el.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%) scale(0.8)`;
+
+        document.body.appendChild(el);
+
+        // particle physics parameters
+        const p = {
+          el,
+          // angle in radians
+          angle: Math.random()*Math.PI*2,
+          // radius from center, start small so they bloom
+          radius: Math.random()*20 + 6,
+          // how fast they orbit (positive or negative)
+          angularSpeed: (0.0006 + Math.random()*0.003) * (Math.random() < 0.5 ? -1 : 1),
+          // slow outward drift
+          radialSpeed: 0.02 + Math.random()*0.9,
+          // slight individual phase for flutter
+          phase: Math.random()*Math.PI*2,
+          // rotation for the glyph itself
+          rotSpeed: (Math.random()*2 - 1) * 0.002,
+          scale: 0.8 + Math.random()*1.2,
+          // copy of vw/vh to detect when viewport changes significantly
+          vw, vh,
+        };
+        particles.push(p);
+      }
+    }
+
+    let lastTime = 0;
+    function frame(now){
+      const dt = Math.min(40, now - lastTime); // ms, clamp to avoid jump after tab switching
+      lastTime = now;
+      updateParticles(now, dt);
+      if (animating) rafId = requestAnimationFrame(frame);
+    }
+
+    function updateParticles(now, dt){
+      if (!particles.length) return;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const cx = vw/2;
+      const cy = vh/2;
+
+      // slowly shift the whole whirl center in a dreamy way
+      const centerDriftX = Math.sin(now*0.00003) * vw * 0.06;
+      const centerDriftY = Math.cos(now*0.00002) * vh * 0.04;
+
+      for (let i = 0; i < particles.length; i++){
+        const p = particles[i];
+        // if viewport changed a lot, gently randomize some params
+        if (Math.abs(p.vw - vw) > 120 || Math.abs(p.vh - vh) > 120){
+          p.vw = vw; p.vh = vh;
+          p.angularSpeed *= 0.9 + Math.random()*0.4;
+        }
+
+        // orbit
+        p.angle += p.angularSpeed * dt;
+        p.radius += p.radialSpeed * (dt * 0.06); // slow radial growth
+
+        // radial wrap: keep radius within a range across page
+        const maxR = Math.hypot(vw, vh) * 0.9;
+        if (p.radius > maxR) {
+          // respawn near center with new letter/appearance for endless feel
+          p.radius = Math.random()*30 + 6;
+          p.angle = Math.random()*Math.PI*2;
+          p.radialSpeed = 0.02 + Math.random()*1.0;
+          p.angularSpeed = (0.0006 + Math.random()*0.003) * (Math.random() < 0.5 ? -1 : 1);
+          p.el.textContent = LETTERS.charAt(Math.floor(Math.random()*LETTERS.length));
+          p.el.style.fontSize = `${(0.8 + Math.random()*1.6)*(Math.min(vw, vh)/40)}px`;
+        }
+
+        // gentle flutter orthogonal to orbit
+        const flutter = Math.sin(now*0.002 + p.phase) * (6 + Math.sin(p.angle*3)*4);
+
+        // compute position with a slight elliptic/whirlpool deformation
+        const x = cx + centerDriftX + Math.cos(p.angle) * (p.radius * (1 + 0.12 * Math.sin(p.angle*2 + now*0.0008)));
+        const y = cy + centerDriftY + Math.sin(p.angle) * (p.radius * (1 + 0.08 * Math.cos(p.angle*1.2 + now*0.0007))) + flutter;
+
+        // subtle rotation for each glyph
+        const rot = (p.angle*180/Math.PI) * 0.25 + now*0.01 * (p.rotSpeed*1000);
+
+        // depth effect: further radius -> smaller and more transparent
+        const depth = Math.min(1, p.radius / (Math.max(vw, vh) * 0.6));
+        const scale = p.scale * (0.7 + (1 - depth) * 0.6);
+
+        p.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) rotate(${rot}deg) scale(${scale})`;
+        p.el.style.opacity = (0.4 + (1 - depth) * 0.8).toFixed(2);
+        p.el.style.filter = `blur(${Math.min(2.5, depth*3)}px)`;
+      }
+    }
+
+    // Clean up when page is hidden (pause animation)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden){
+        if (rafId) cancelAnimationFrame(rafId);
+      } else if (animating && !rafId){
+        lastTime = performance.now();
+        rafId = requestAnimationFrame(frame);
+      }
+    });
+
+    // On resize, rebuild particles to adapt sizing/density
+    let resizeTO;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTO);
+      resizeTO = setTimeout(() => {
+        if (animating){
+          // remove and rebuild to adapt density
+          particles.forEach(p => p.el.remove());
+          particles = [];
+          buildParticles();
+        }
+      }, 250);
+      // also restart idle timeout on resize (user interaction)
+      resetIdle();
+    });
+
+    // Clean-up on unload
+    window.addEventListener('pagehide', () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      particles.forEach(p => p.el.remove());
+      particles = [];
+    });
+
+    // Expose for debugging (optional)
+    window.__whirl = {
+      start: startAnimation,
+      stop: stopAnimation,
+      resetIdle
+    };
+  })();
+  </script>
+</body>
+</html>

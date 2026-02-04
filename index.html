@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>hello.avner.sorek.github.world.io</title>
+  <title>hello.avner.world.sorek.github.io</title>
 
   <!-- IBM Plex Mono -->
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600&display=swap" rel="stylesheet">
@@ -82,7 +82,7 @@
   </style>
 </head>
 <body>
-  <!-- Center message removed on purpose (letters will be created and animated independently) -->
+  <!-- Center message removed on purpose (letters are created and animated independently) -->
   <div class="vignette" aria-hidden="true"></div>
 
   <script>
@@ -178,8 +178,8 @@
       vxMax: 520,
       verticalJitter: 26,
       maxParticles: 450,      // lowered for smoother performance
-      bigVxMin: 24,
-      bigVxMax: 120,
+      bigVxMin: 16,           // make big letters slower to come in
+      bigVxMax: 80,
       bigLifeMin: 14000,
       bigLifeMax: 36000
     };
@@ -229,7 +229,7 @@
       particles.push({ el, x, y, vx, vy, birth: performance.now(), life, size });
     }
 
-    // Create big letters from TEXT, positioned centered and then animated individually.
+    // Create big letters from TEXT, positioned off-screen left initially so they drift in slowly.
     let messageExploded = false;
     function explodeTextIntoBigLetters(){
       if (messageExploded) return;
@@ -268,11 +268,15 @@
       const rects = spans.map(s => s.span.getBoundingClientRect());
       // compute total width
       const totalWidth = rects.reduce((sum, r) => sum + r.width, 0);
-      const centerX = vw / 2;
-      const centerY = vh / 2;
-      const startX = centerX - totalWidth / 2;
 
-      // create big letters at measured centers
+      // Start the entire word off-screen to the left so letters drift in naturally
+      const gapLeft = Math.max(160, vw * 0.12); // how far left the first letter starts
+      const startX = -totalWidth - gapLeft;
+
+      // vertical center baseline
+      const centerY = vh / 2;
+
+      // create big letters at measured centers (offset to startX so they begin off-screen left)
       const now = performance.now();
       let acc = 0;
       for (let i = 0; i < rects.length; i++) {
@@ -280,25 +284,28 @@
         const ch = spans[i].ch;
         acc += r.width;
         if (ch === ' ') {
-          // skip creating element; keep spacing by advancing acc
-          continue;
+          continue; // skip element for spaces but maintain spacing in acc
         }
-        // center of this char
+        // center of this char relative to startX
         const cx = startX + acc - (r.width / 2);
-        const cy = centerY;
+        // give a small vertical offset variation to look wind-blown
+        const cy = centerY + (Math.random() - 0.5) * Math.min(0.06 * vh, 40);
         const el = document.createElement('div');
         el.className = 'big-letter';
         el.textContent = ch;
         const size = Math.max(22, Math.round(r.height || fontSize));
         el.style.fontSize = `${size}px`;
-        el.style.transform = `translate3d(${cx}px, ${cy}px, 0) translate(-50%,-50%) rotate(0deg) scale(1)`;
+        el.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(cy)}px, 0) translate(-50%,-50%) rotate(0deg) scale(1)`;
         el.style.opacity = '1';
         document.body.appendChild(el);
 
-        const vx = lerp(config.bigVxMin, config.bigVxMax, Math.random());
-        const vy = (Math.random() * 2 - 1) * 10;
+        // give each letter a slight random base speed (slow) so they arrive gently, later ramp increases overall speed
+        const vx = lerp(config.bigVxMin, config.bigVxMax, Math.random() * 0.6); // bias lower for slower arrival
+        const vy = (Math.random() * 2 - 1) * 8;
         const life = randomRange(config.bigLifeMin, config.bigLifeMax);
-        bigLetters.push({ el, x: cx, y: cy, vx, vy, birth: now, life, size });
+        // small stagger in birth time so they don't all perfectly align
+        const birth = now + i * (80 + Math.random() * 120);
+        bigLetters.push({ el, x: cx, y: cy, vx, vy, birth, life, size });
       }
 
       // cleanup wrapper
@@ -341,25 +348,32 @@
 
       // big letters
       if (bigLetters.length) {
-        const t = Math.min(1, elapsed / (rampDuration * 1.5));
-        const speedMul = lerp(0.5, 1.0, easeOutCubic(t));
+        // use ramp to slowly accelerate letters as "wind builds"
+        const t = Math.min(1, elapsed / (rampDuration * 1.6));
+        const speedMul = lerp(0.45, 1.0, easeOutCubic(t));
         for (let i = 0; i < bigLetters.length; i++) {
           const b = bigLetters[i];
-          b.x += b.vx * speedMul * (dt / 1000);
-          b.y += b.vy * (dt / 1000) + Math.sin((now * 0.002) + i) * 0.02 * (b.size / 24);
+          // ensure letter doesn't start moving until its birth (stagger)
+          const localDt = Math.max(0, now - b.birth);
+          // apply movement only if letter has "born"
+          if (localDt > 0) {
+            b.x += b.vx * speedMul * (dt / 1000);
+            b.y += b.vy * (dt / 1000) + Math.sin((now * 0.0018) + i) * 0.02 * (b.size / 24);
+          }
 
+          // wrap-around horizontally when it goes off right
           if (b.x > vw + 120) {
             b.x = -120 - Math.random() * 40;
             b.y = clamp((vh * 0.15) + Math.random() * vh * 0.7, 20, vh - 20);
-            b.birth = now;
+            b.birth = now + Math.random() * 600; // small delay before re-entering
           } else if (b.x < -160) {
             b.x = vw + 120;
-            b.birth = now;
+            b.birth = now + Math.random() * 600;
           }
 
-          const rot = Math.sin((b.x + b.y) * 0.002 + i) * 16 * (b.vx / (config.bigVxMax + 0.001));
+          const rot = Math.sin((b.x + b.y) * 0.002 + i) * 14 * (b.vx / (config.bigVxMax + 0.001));
           const lifeProgress = ((now - b.birth) % b.life) / b.life;
-          const opacity = 0.64 + (1 - lifeProgress) * 0.36;
+          const opacity = 0.66 + (1 - lifeProgress) * 0.34;
           const scale = 0.92 + (1 - lifeProgress) * 0.22;
 
           b.el.style.transform = `translate3d(${Math.round(b.x)}px, ${Math.round(b.y)}px, 0) translate(-50%,-50%) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
@@ -484,7 +498,6 @@
     // warm-up to reduce jank when fonts load
     window.addEventListener('load', () => {
       setTimeout(() => {
-        // touch a layout measurement so fonts are ready
         const el = document.createElement('span');
         el.style.fontFamily = "'IBM Plex Mono', monospace";
         el.style.fontSize = '16px';

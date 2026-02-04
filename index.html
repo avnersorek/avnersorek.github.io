@@ -21,9 +21,11 @@
       color:var(--fg);
       font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
       overflow:hidden;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
     }
 
-    /* Hello World — large centered message (flies away as a single large element) */
+    /* Hello World placeholder center (letters will be exploded into big-letter elements) */
     #message{
       position:fixed;
       left:50%;
@@ -42,6 +44,29 @@
         0 6px 20px rgba(2,3,9,0.7),
         0 1px 0 rgba(255,255,255,0.02);
       white-space:nowrap;
+      will-change:transform, opacity;
+    }
+
+    /* large independent letters */
+    .big-letter{
+      position:fixed;
+      left:0;
+      top:0;
+      transform-origin:center center;
+      will-change:transform, opacity;
+      pointer-events:none;
+      user-select:none;
+      font-family:'IBM Plex Mono', monospace;
+      font-weight:600;
+      color:var(--fg);
+      z-index:4;
+      text-shadow:
+        0 6px 18px rgba(2,3,9,0.7),
+        0 1px 0 rgba(255,255,255,0.02);
+      white-space:pre;
+      backface-visibility:hidden;
+      -webkit-transform: translate3d(0,0,0);
+      transform-style:preserve-3d;
     }
 
     /* particle letters (small, mono) */
@@ -50,14 +75,16 @@
       left:0;
       top:0;
       transform-origin:center center;
-      will-change:transform, opacity, filter;
+      will-change:transform, opacity;
       pointer-events:none;
       user-select:none;
       font-family:'IBM Plex Mono', monospace;
       font-weight:400;
-      mix-blend-mode:screen;
-      text-shadow:
-        0 2px 6px rgba(0,0,0,0.5);
+      color:rgba(230,240,255,0.98);
+      text-shadow: 0 2px 6px rgba(0,0,0,0.45);
+      white-space:pre;
+      backface-visibility:hidden;
+      -webkit-transform: translate3d(0,0,0);
     }
 
     .vignette{
@@ -72,6 +99,7 @@
 
     @media (prefers-reduced-motion: reduce){
       .whirl-letter{ transition:none !important; animation:none !important; opacity:0 !important; }
+      .big-letter{ transition:none !important; animation:none !important; }
     }
   </style>
 </head>
@@ -81,39 +109,30 @@
 
   <script>
   (function () {
-    // Allowed letters from "hello world"
+    // Allowed letters for small particles (lowercase)
     const LETTERS = 'helloworld';
 
-    // Base ramp and spawn config
-    const rampDuration = 10000; // ms to ramp to full speed
+    // Performance-minded config and runtime state
+    const rampDuration = 10000;
     let idleTimer = null;
     let animating = false;
     let rafId = null;
 
     let message = document.getElementById('message');
-
-    // Respect reduced motion
     const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduced) return;
 
-    // Mouse movement tracking (to influence idle wait)
-    const mouseSamples = []; // {x,y,t}
-    const sampleWindow = 600; // ms window to compute speed
-    const maxConsideredSpeed = 1200; // px/s maps to top of delay range
+    // Input sampling to compute speed-based delay
+    const mouseSamples = [];
+    const sampleWindow = 600;
+    const maxConsideredSpeed = 1200;
+    const minDelay = 1200, maxDelay = 7000;
 
-    // Delay range (ms) when deciding when to start animation based on movement
-    const minDelay = 1200;
-    const maxDelay = 7000;
-
-    // Activity events: we track movement for delay but do NOT stop animation once started
     const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'touchmove'];
     activityEvents.forEach(e => window.addEventListener(e, onActivity, { passive: true }));
-
-    // Also keep an explicit mousemove listener to capture fine-grained speed (including touchmove above)
     window.addEventListener('mousemove', captureMouse, { passive: true });
     window.addEventListener('touchmove', captureTouch, { passive: true });
 
-    // initial schedule
     scheduleIdle();
 
     function captureMouse(ev) {
@@ -121,7 +140,6 @@
       mouseSamples.push({ x: ev.clientX, y: ev.clientY, t });
       pruneSamples(t);
     }
-
     function captureTouch(ev) {
       const t = performance.now();
       if (ev.touches && ev.touches[0]) {
@@ -129,35 +147,24 @@
         pruneSamples(t);
       }
     }
-
     function pruneSamples(now) {
-      while (mouseSamples.length > 0 && now - mouseSamples[0].t > sampleWindow) mouseSamples.shift();
-      // also keep sample array length reasonable
+      while (mouseSamples.length && now - mouseSamples[0].t > sampleWindow) mouseSamples.shift();
       if (mouseSamples.length > 30) mouseSamples.splice(0, mouseSamples.length - 30);
     }
-
     function computeAvgSpeed() {
       if (mouseSamples.length < 2) return 0;
       const first = mouseSamples[0];
       const last = mouseSamples[mouseSamples.length - 1];
-      const dt = (last.t - first.t) / 1000; // seconds
+      const dt = (last.t - first.t) / 1000;
       if (dt <= 0) return 0;
       let dist = 0;
       for (let i = 1; i < mouseSamples.length; i++) {
-        const a = mouseSamples[i - 1];
-        const b = mouseSamples[i];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        dist += Math.hypot(dx, dy);
+        const a = mouseSamples[i - 1], b = mouseSamples[i];
+        dist += Math.hypot(b.x - a.x, b.y - a.y);
       }
-      const speed = dist / dt; // px/s
-      return speed;
+      return dist / dt;
     }
-
-    // When user activity happens, we reschedule the idle timer based on current movement.
-    // IMPORTANT: do NOT stop the animation if it's already running.
     function onActivity(ev) {
-      // capture movement from non-mouse events quickly
       if (ev.type === 'mousedown' && ev.clientX != null) {
         const t = performance.now();
         mouseSamples.push({ x: ev.clientX, y: ev.clientY, t });
@@ -165,23 +172,18 @@
       }
       scheduleIdle();
     }
-
     function scheduleIdle() {
       if (idleTimer) clearTimeout(idleTimer);
-      // compute speed and map to delay
       const speed = computeAvgSpeed();
-      const speedNorm = Math.min(1, Math.max(0, speed / maxConsideredSpeed)); // 0..1
+      const speedNorm = Math.min(1, Math.max(0, speed / maxConsideredSpeed));
       const mappedDelay = Math.round(lerp(minDelay, maxDelay, speedNorm));
-      // If animation already started, do not clear it later on activity — we only use the timer to start once.
-      if (!animating) {
-        idleTimer = setTimeout(() => {
-          startAnimation();
-        }, mappedDelay);
-      }
+      if (!animating) idleTimer = setTimeout(startAnimation, mappedDelay);
     }
 
-    // Core animation state
-    let particles = [];
+    // Runtime pools and arrays to minimize allocations and DOM churn
+    let particlePool = [];
+    let particles = [];       // active small particles
+    let bigLetters = [];      // active big letters
     let streams = [];
     let spawnAccumulator = 0;
     let startTime = 0;
@@ -189,143 +191,181 @@
 
     const config = {
       spawnRateMin: 3,
-      spawnRateMax: 120,
+      spawnRateMax: 100,
       streamsMin: 2,
-      streamsMaxPerHeight: 0.012,
+      streamsMaxPerHeight: 0.010,
       particleLifeMin: 2400,
       particleLifeMax: 7000,
       vxMin: 60,
       vxMax: 520,
-      verticalJitter: 28,
-      maxParticles: 600, // further reduced for performance
+      verticalJitter: 26,
+      maxParticles: 450,      // lowered for smoother performance
+      bigVxMin: 24,
+      bigVxMax: 120,
+      bigLifeMin: 14000,
+      bigLifeMax: 36000
     };
 
     function initStreams(count) {
-      streams = [];
+      streams.length = 0;
       const vh = window.innerHeight;
-      for (let i = 0; i < count; i++) {
-        streams.push(createStream(Math.random() * vh));
-      }
+      for (let i = 0; i < count; i++) streams.push(createStream(Math.random() * vh));
+    }
+    function createStream(y) {
+      return { y, phase: Math.random() * Math.PI * 2, xOffset: -10 - Math.random() * 40, speedMul: 0.8 + Math.random() * 0.6, acc: 0 };
     }
 
-    function createStream(y) {
-      return {
-        y,
-        phase: Math.random() * Math.PI * 2,
-        xOffset: -12 - Math.random() * 40,
-        speedMul: 0.8 + Math.random() * 0.7,
-        acc: 0
-      };
+    // Reuse span elements for particles to avoid GC and layout thrash
+    function getParticleElement() {
+      let el = particlePool.pop();
+      if (el) {
+        el.style.display = '';
+        return el;
+      }
+      el = document.createElement('span');
+      el.className = 'whirl-letter';
+      el.style.position = 'fixed';
+      el.style.left = '0px';
+      el.style.top = '0px';
+      el.style.willChange = 'transform, opacity';
+      el.style.pointerEvents = 'none';
+      el.style.userSelect = 'none';
+      el.style.backfaceVisibility = 'hidden';
+      return el;
+    }
+    function releaseParticleElement(el) {
+      el.style.display = 'none';
+      particlePool.push(el);
     }
 
     function spawnParticle(x, y, vx, vy, life, ch, size, colorHue) {
-      if (particles.length > config.maxParticles) return;
-      const el = document.createElement('span');
-      el.className = 'whirl-letter';
+      if (particles.length >= config.maxParticles) return;
+      const el = getParticleElement();
       el.textContent = ch;
-      el.style.left = '0px';
-      el.style.top = '0px';
       el.style.fontSize = `${size}px`;
-      el.style.opacity = '0.98';
       el.style.zIndex = 2 + Math.floor(Math.random() * 20);
-      el.style.color = `hsl(${colorHue} ${58 + Math.random()*20}% ${56 + Math.random()*8}%)`;
+      // HSL string kept simple; opacity handled separately
+      el.style.color = `hsl(${colorHue} ${56 + Math.random()*18}% ${56 + Math.random()*8}%)`;
+
+      // initialize transform using translate3d for GPU acceleration
+      el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%,-50%) rotate(0deg) scale(1)`;
+      el.style.opacity = '0.98';
+
+      // append once — reuse element avoids reflows in future frames
       document.body.appendChild(el);
 
-      particles.push({
-        el,
-        x, y,
-        vx, vy,
-        birth: performance.now(),
-        life,
-        size
-      });
+      particles.push({ el, x, y, vx, vy, birth: performance.now(), life, size });
     }
 
-    // Animate the central large message flying away (single large object).
-    let _messageOriginal = null;
-    let messageHasFlown = false;
-    function animateMessageFly(){
-      if (!message || messageHasFlown) return;
-      messageHasFlown = true;
-      _messageOriginal = {
-        transform: message.style.transform || '',
-        transition: message.style.transition || '',
-        opacity: message.style.opacity || '',
-        left: message.style.left || '',
-        top: message.style.top || '',
-        zIndex: message.style.zIndex || ''
-      };
+    // Create big letters from the message and put them into bigLetters (single use but reused on stop/start)
+    let messageExploded = false;
+    function explodeMessageIntoBigLetters(){
+      if (messageExploded || !message) return;
+      messageExploded = true;
+      // create a hidden wrapper to measure characters precisely
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'fixed';
+      wrapper.style.left = '-9999px';
+      wrapper.style.top = '-9999px';
+      wrapper.style.fontFamily = getComputedStyle(message).fontFamily;
+      wrapper.style.fontSize = getComputedStyle(message).fontSize;
+      wrapper.style.fontWeight = getComputedStyle(message).fontWeight;
+      wrapper.style.whiteSpace = 'pre';
+      wrapper.style.letterSpacing = getComputedStyle(message).letterSpacing;
+      wrapper.style.visibility = 'hidden';
+      wrapper.textContent = message.textContent || '';
+      document.body.appendChild(wrapper);
 
-      message.style.transition = 'transform 2200ms cubic-bezier(.22,1,.36,1), opacity 1200ms ease';
-      message.style.willChange = 'transform, opacity';
-      void message.offsetWidth;
+      // create per-character spans for measurement
+      const chars = [];
+      wrapper.innerHTML = '';
+      const text = message.textContent || '';
+      for (let ch of text) {
+        const span = document.createElement('span');
+        span.textContent = ch;
+        span.style.display = 'inline-block';
+        wrapper.appendChild(span);
+        chars.push(span);
+      }
+      const rects = chars.map(sp => sp.getBoundingClientRect());
+      message.remove();
+      wrapper.remove();
 
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const finalX = Math.round(vw * (1.12 + Math.random() * 0.2));
-      const finalY = Math.round((Math.random() - 0.5) * vh * 0.5);
-      const angle = (Math.random() * 30 + 6) * (Math.random() < 0.5 ? -1 : 1);
-      const finalScale = 0.95 + Math.random() * 0.12;
+      const now = performance.now();
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        const ch = text[i];
+        if (ch === ' ') continue;
+        const el = document.createElement('div');
+        el.className = 'big-letter';
+        el.textContent = ch;
+        const size = Math.max(22, Math.round(r.height || parseFloat(getComputedStyle(document.documentElement).fontSize || 48)));
+        el.style.fontSize = `${size}px`;
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        el.style.transform = `translate3d(${cx}px, ${cy}px, 0) translate(-50%,-50%) rotate(0deg) scale(1)`;
+        el.style.opacity = '1';
+        document.body.appendChild(el);
 
-      setTimeout(() => {
-        message.style.transform = `translate(${finalX}px, ${finalY}px) translate(-50%,-50%) rotate(${angle}deg) scale(${finalScale})`;
-        message.style.opacity = '0.95';
-      }, 16);
-
-      // subtle continued drift after the main flight so it visually continues with the whirlwind
-      setTimeout(() => {
-        message.style.transition = 'transform 7000ms linear, opacity 3000ms linear';
-        const extraX = Math.round(vw * 0.35);
-        const extraY = finalY * 0.6;
-        message.style.transform = `translate(${finalX + extraX}px, ${finalY + extraY}px) translate(-50%,-50%) rotate(${angle*1.2}deg) scale(${finalScale*0.96})`;
-        message.style.opacity = '0.88';
-      }, 2600);
+        const vx = lerp(config.bigVxMin, config.bigVxMax, Math.random());
+        const vy = (Math.random() * 2 - 1) * 10;
+        const life = randomRange(config.bigLifeMin, config.bigLifeMax);
+        bigLetters.push({ el, x: cx, y: cy, vx, vy, birth: now, life, size });
+      }
     }
 
     function startAnimation(){
-      if (animating) return; // already running
+      if (animating) return;
       animating = true;
       lastTime = performance.now();
       startTime = lastTime;
-      particles = [];
-      streams = [];
+      particles.length = 0;
+      bigLetters.length = 0;
+      streams.length = 0;
       spawnAccumulator = 0;
-
       initStreams(2);
-      animateMessageFly();
+      explodeMessageIntoBigLetters();
       rafId = requestAnimationFrame(frame);
     }
 
-    // We no longer stop animation on user interaction; it loops indefinitely until explicitly stopped.
     function stopAnimation(){
       animating = false;
       if (rafId) cancelAnimationFrame(rafId);
       rafId = null;
-      particles.forEach(p => p.el.remove());
-      particles = [];
-      streams = [];
-      restoreMessage();
-    }
-
-    function restoreMessage(){
-      // Try to restore original inline styles if needed
-      message = document.getElementById('message');
-      if (!message) return;
-      if (_messageOriginal) {
-        message.style.transition = 'none';
-        void message.offsetWidth;
-        message.style.transform = _messageOriginal.transform || 'translate(-50%,-50%)';
-        message.style.left = _messageOriginal.left || '50%';
-        message.style.top = _messageOriginal.top || '50%';
-        message.style.opacity = _messageOriginal.opacity || '';
-        message.style.zIndex = _messageOriginal.zIndex || '';
-        setTimeout(() => {
-          message.style.transition = _messageOriginal.transition || 'opacity 0.8s ease, transform 0.8s ease';
-        }, 20);
+      // hide and pool particle elements
+      for (let p of particles) {
+        releaseParticleElement(p.el);
       }
+      particles.length = 0;
+      // remove big letters from DOM
+      for (let b of bigLetters) b.el.remove();
+      bigLetters.length = 0;
+      streams.length = 0;
+      // restore original message if missing
+      if (!document.getElementById('message')) {
+        const m = document.createElement('div');
+        m.id = 'message';
+        m.textContent = 'Hello World';
+        m.style.position = 'fixed';
+        m.style.left = '50%';
+        m.style.top = '50%';
+        m.style.transform = 'translate(-50%,-50%)';
+        m.style.fontFamily = "'IBM Plex Mono', monospace";
+        m.style.fontSize = 'clamp(28px,6vw,84px)';
+        m.style.letterSpacing = '0.04em';
+        m.style.fontWeight = '600';
+        m.style.color = 'var(--fg)';
+        m.style.textAlign = 'center';
+        m.style.zIndex = '3';
+        m.style.pointerEvents = 'none';
+        m.style.textShadow = '0 6px 20px rgba(2,3,9,0.7), 0 1px 0 rgba(255,255,255,0.02)';
+        document.body.appendChild(m);
+        message = m;
+      }
+      messageExploded = false;
     }
 
-    // Frame loop
+    // Main frame: update big letters (wrap-around) and small particles. Keep operations minimal per element.
     function frame(now) {
       const dt = Math.min(40, now - lastTime);
       lastTime = now;
@@ -333,11 +373,41 @@
       const vw = window.innerWidth;
       const vh = window.innerHeight;
 
-      const t = Math.min(1, elapsed / rampDuration);
-      const spawnRate = lerp(config.spawnRateMin, config.spawnRateMax, easeOutCubic(t));
-      const vxBase = lerp(config.vxMin, config.vxMax, easeOutCubic(t));
+      // update big letters (slow, wrap horizontally)
+      if (bigLetters.length) {
+        const t = Math.min(1, elapsed / (rampDuration * 1.5));
+        const speedMul = lerp(0.5, 1.0, easeOutCubic(t));
+        for (let i = 0; i < bigLetters.length; i++) {
+          const b = bigLetters[i];
+          b.x += b.vx * speedMul * (dt / 1000);
+          b.y += b.vy * (dt / 1000) + Math.sin((now * 0.002) + i) * 0.02 * (b.size / 24);
 
-      const targetStreams = Math.max(config.streamsMin, Math.min(18, Math.round(vh * config.streamsMaxPerHeight * (0.9 + t))));
+          if (b.x > vw + 120) {
+            b.x = -120 - Math.random() * 40;
+            b.y = clamp((vh * 0.15) + Math.random() * vh * 0.7, 20, vh - 20);
+            b.birth = now;
+          } else if (b.x < -160) {
+            b.x = vw + 120;
+            b.birth = now;
+          }
+
+          const rot = Math.sin((b.x + b.y) * 0.002 + i) * 16 * (b.vx / (config.bigVxMax + 0.001));
+          const lifeProgress = ((now - b.birth) % b.life) / b.life;
+          const opacity = 0.64 + (1 - lifeProgress) * 0.36;
+          const scale = 0.92 + (1 - lifeProgress) * 0.22;
+
+          // Use translate3d to ensure GPU compositing
+          b.el.style.transform = `translate3d(${Math.round(b.x)}px, ${Math.round(b.y)}px, 0) translate(-50%,-50%) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+          b.el.style.opacity = opacity.toFixed(3);
+        }
+      }
+
+      // small particles spawning (conservative)
+      const tRamp = Math.min(1, elapsed / rampDuration);
+      const spawnRate = lerp(config.spawnRateMin, config.spawnRateMax, easeOutCubic(tRamp));
+      const vxBase = lerp(config.vxMin, config.vxMax, easeOutCubic(tRamp));
+
+      const targetStreams = Math.max(config.streamsMin, Math.min(14, Math.round(vh * config.streamsMaxPerHeight * (0.9 + tRamp))));
       if (streams.length < targetStreams) {
         if (Math.random() < 0.12) streams.push(createStream(Math.random() * vh));
       } else if (streams.length > targetStreams) {
@@ -346,14 +416,13 @@
 
       const spawnFromStreams = spawnRate * 0.82;
       const strayRate = spawnRate - spawnFromStreams;
-
       spawnAccumulator += (strayRate * dt / 1000);
       while (spawnAccumulator >= 1) {
         spawnAccumulator -= 1;
         const y = Math.random() * vh;
         const xStart = -20 - Math.random() * 80;
-        const vx = vxBase * (0.7 + Math.random() * 0.8);
-        const vy = (Math.random() * 2 - 1) * 24;
+        const vx = vxBase * (0.72 + Math.random() * 0.76);
+        const vy = (Math.random() * 2 - 1) * 18;
         const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.8 + Math.random()*0.8);
         const ch = LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
         const size = Math.max(8, Math.min(14, (Math.min(vw, vh) / 80) * (0.6 + Math.random())));
@@ -372,11 +441,11 @@
         }
         while (s.acc >= 1) {
           s.acc -= 1;
-          const yJitter = (Math.random() - 0.5) * 14;
+          const yJitter = (Math.random() - 0.5) * 12;
           const y = clamp(s.y + yJitter, 8, vh - 8);
           const xStart = s.xOffset - (Math.random() * 18);
-          const vx = vxBase * s.speedMul * (0.85 + Math.random() * 0.5);
-          const vy = (Math.random() * 2 - 1) * 18;
+          const vx = vxBase * s.speedMul * (0.86 + Math.random() * 0.44);
+          const vy = (Math.random() * 2 - 1) * 14;
           const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.8 + Math.random()*1.0);
           const ch = LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
           const size = Math.max(7, Math.min(12, (Math.min(vw, vh) / 100) * (0.6 + Math.random())));
@@ -385,25 +454,26 @@
         }
       }
 
-      // update particles
+      // update particles (avoid heavy ops like filter; only transform + opacity)
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         const age = now - p.birth;
         if (age > p.life || p.x > vw + 80 || p.y < -120 || p.y > vh + 120) {
-          p.el.remove();
+          // hide and pool element instead of removing
+          releaseParticleElement(p.el);
           particles.splice(i, 1);
           continue;
         }
         p.x += p.vx * (dt / 1000);
-        const flutter = Math.sin((now * 0.003) + i) * (config.verticalJitter * (0.2 + Math.sin(i)*0.2));
+        const flutter = Math.sin((now * 0.003) + i) * (config.verticalJitter * (0.2 + Math.sin(i) * 0.2));
         p.y += p.vy * (dt / 1000) + flutter * (dt / 1000);
-        const rot = (Math.sin((p.x + p.y) * 0.002 + i) * 24) * (p.vx / (vxBase + 0.001));
+        const rot = (Math.sin((p.x + p.y) * 0.002 + i) * 22) * (p.vx / (vxBase + 0.001));
         const lifeProgress = age / p.life;
         const opacity = Math.max(0, 1 - lifeProgress);
-        const scale = 0.82 + (1 - lifeProgress) * 0.5;
-        p.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%) rotate(${rot}deg) scale(${scale})`;
+        const scale = 0.82 + (1 - lifeProgress) * 0.45;
+
+        p.el.style.transform = `translate3d(${Math.round(p.x)}px, ${Math.round(p.y)}px, 0) translate(-50%,-50%) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
         p.el.style.opacity = Math.max(0.04, opacity).toFixed(3);
-        p.el.style.filter = `blur(${Math.min(1.6, lifeProgress * 2)}px)`;
       }
 
       if (animating) rafId = requestAnimationFrame(frame);
@@ -415,7 +485,7 @@
     function randomRange(a, b) { return a + Math.random() * (b - a); }
     function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
 
-    // Pause/resume on visibility change
+    // Visibility / resize handling
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         if (rafId) cancelAnimationFrame(rafId);
@@ -426,14 +496,13 @@
       }
     });
 
-    // Rebuild streams on resize
     let resizeTO;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTO);
       resizeTO = setTimeout(() => {
         if (animating) {
           const vh = window.innerHeight;
-          const targetStreams = Math.max(config.streamsMin, Math.min(18, Math.round(vh * config.streamsMaxPerHeight)));
+          const targetStreams = Math.max(config.streamsMin, Math.min(14, Math.round(vh * config.streamsMaxPerHeight)));
           while (streams.length < targetStreams) streams.push(createStream(Math.random() * vh));
           while (streams.length > targetStreams) streams.pop();
         }
@@ -441,17 +510,22 @@
       scheduleIdle();
     });
 
-    // Cleanup on pagehide
     window.addEventListener('pagehide', () => {
       if (rafId) cancelAnimationFrame(rafId);
     });
 
-    // Expose control
-    window.__whirl = {
-      start: startAnimation,
-      stop: stopAnimation,
-      scheduleIdle
-    };
+    // Public API for debug/control
+    window.__whirl = { start: startAnimation, stop: stopAnimation, scheduleIdle };
+
+    // Expose a little warm-up to ensure fonts are loaded
+    // (this reduces jank when text first appears)
+    window.addEventListener('load', () => {
+      // small timeout to allow font settle
+      setTimeout(() => {
+        // touch the message's layout once
+        if (message) message.getBoundingClientRect();
+      }, 200);
+    });
   })();
   </script>
 </body>

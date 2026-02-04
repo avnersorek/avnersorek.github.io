@@ -23,7 +23,7 @@
       overflow:hidden;
     }
 
-    /* centered Hello World in Plex Mono */
+    /* centered Hello World in Plex Mono (will be broken into letters when animation starts) */
     #message{
       position:fixed;
       left:50%;
@@ -37,14 +37,11 @@
       text-align:center;
       z-index:3;
       pointer-events:none;
-      transition:opacity 1s ease, transform 1s ease;
+      transition:opacity 0.8s ease, transform 0.8s ease;
       text-shadow:
         0 6px 20px rgba(2,3,9,0.7),
         0 1px 0 rgba(255,255,255,0.02);
-    }
-    #message.faint{
-      opacity:0.06;
-      transform:translate(-50%,-50%) scale(0.98);
+      white-space:nowrap;
     }
 
     /* particle letters (small, mono) */
@@ -84,10 +81,10 @@
 
   <script>
   (function () {
-    // Only letters from "hello world" (lowercase)
+    // Lowercase letters allowed (words "hello world")
     const LETTERS = 'helloworld';
-    const idleDelay = 5000; // ms before auto-start
-    const rampDuration = 12000; // ms to go from slow to full speed
+    const idleDelay = 5000;     // ms before auto-start
+    const rampDuration = 10000; // ms to go from slow to full speed
     let idleTimer = null;
     let animating = false;
     let rafId = null;
@@ -115,49 +112,73 @@
 
     function startAnimation(){
       animating = true;
-      message.classList.add('faint');
-      // create runtime state
-      startTime = performance.now();
-      lastTime = startTime;
+      lastTime = performance.now();
+      startTime = lastTime;
       particles = [];
       streams = [];
       spawnAccumulator = 0;
-      initStreams(3); // start with a few streams
+
+      // Reduced initial streams for performance
+      initStreams(2);
+
+      // Break the central message into letters that become particles ("fly away")
+      explodeMessage();
+
       rafId = requestAnimationFrame(frame);
     }
 
     function stopAnimation(){
       animating = false;
-      message.classList.remove('faint');
       if (rafId) cancelAnimationFrame(rafId);
       rafId = null;
       // remove DOM nodes
       particles.forEach(p => p.el.remove());
       particles = [];
       streams = [];
+      // restore message if it was removed
+      if (!document.body.contains(message)) {
+        // recreate message node for a static fallback
+        const m = document.createElement('div');
+        m.id = 'message';
+        m.textContent = 'Hello World';
+        m.style.position = 'fixed';
+        m.style.left = '50%';
+        m.style.top = '50%';
+        m.style.transform = 'translate(-50%,-50%)';
+        m.style.fontFamily = "'IBM Plex Mono', monospace";
+        m.style.fontSize = 'clamp(28px,6vw,84px)';
+        m.style.letterSpacing = '0.04em';
+        m.style.fontWeight = '600';
+        m.style.color = 'var(--fg)';
+        m.style.textAlign = 'center';
+        m.style.zIndex = '3';
+        m.style.pointerEvents = 'none';
+        m.style.textShadow = '0 6px 20px rgba(2,3,9,0.7), 0 1px 0 rgba(255,255,255,0.02)';
+        document.body.appendChild(m);
+      }
     }
 
     // Particles currently on screen
     let particles = [];
-    // Streams that emit letters (to create trailing "horizontal columns" like rotated Matrix)
+    // Streams that emit letters (horizontal "columns" moving left->right)
     let streams = [];
     // Accumulators
     let spawnAccumulator = 0;
     let startTime = 0;
     let lastTime = 0;
 
-    // Config: ranges for speeds and counts
+    // Config: toned-down numbers for improved performance
     const config = {
-      spawnRateMin: 6,        // letters/sec at start (global)
-      spawnRateMax: 220,      // letters/sec at full speed
-      streamsMin: 3,
-      streamsMaxPerHeight: 0.025, // fraction of vh -> stream count = vh * this
-      particleLifeMin: 2600,  // ms
-      particleLifeMax: 8200,  // ms
-      vxMin: 40,              // px/s at start
-      vxMax: 700,             // px/s at top speed
-      verticalJitter: 30,     // px amplitude for leaf-like flutter
-      maxParticles: 1500,
+      spawnRateMin: 3,        // letters/sec at start (global) - reduced
+      spawnRateMax: 120,      // letters/sec at full speed - reduced
+      streamsMin: 2,
+      streamsMaxPerHeight: 0.012, // fewer streams per height
+      particleLifeMin: 2400,  // ms
+      particleLifeMax: 7000,  // ms
+      vxMin: 60,              // px/s at start
+      vxMax: 520,             // px/s at top speed
+      verticalJitter: 28,     // px amplitude for leaf-like flutter
+      maxParticles: 800,      // reduced ceiling
     };
 
     function initStreams(count) {
@@ -172,13 +193,9 @@
     function createStream(y) {
       return {
         y,
-        // phase to offset sine flutter
         phase: Math.random() * Math.PI * 2,
-        // each stream has a small horizontal jitter to vary starting X a bit
         xOffset: -10 - Math.random() * 60,
-        // small personal speed multiplier
-        speedMul: 0.8 + Math.random() * 0.8,
-        // emission accumulator per stream
+        speedMul: 0.8 + Math.random() * 0.7,
         acc: 0
       };
     }
@@ -194,8 +211,7 @@
       el.style.fontSize = `${size}px`;
       el.style.opacity = '0.98';
       el.style.zIndex = 2 + Math.floor(Math.random() * 20);
-      // color tuned to a cool palette
-      el.style.color = `hsl(${colorHue} ${60 + Math.random()*20}% ${58 + Math.random()*8}%)`;
+      el.style.color = `hsl(${colorHue} ${58 + Math.random()*20}% ${56 + Math.random()*8}%)`;
       document.body.appendChild(el);
 
       particles.push({
@@ -205,6 +221,53 @@
         birth: performance.now(),
         life,
         size
+      });
+    }
+
+    // When animation starts, break the centered message into letters that fly away
+    function explodeMessage() {
+      if (!message) return;
+      const rect = message.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      // take visible characters from message, keep case but only use letters from allowed set
+      const text = message.textContent || '';
+      let chars = [];
+      for (let ch of text) {
+        const low = ch.toLowerCase();
+        if (low === ' ') {
+          // create a small gap particle occasionally for a natural look (optional)
+          if (Math.random() < 0.2) chars.push(' ');
+          else chars.push(' ');
+          continue;
+        }
+        // map any character to nearest allowed letter (for consistency use allowed letters)
+        if (LETTERS.includes(low)) chars.push(low);
+        else chars.push(LETTERS[Math.floor(Math.random() * LETTERS.length)]);
+      }
+
+      // Remove the message element so letters are represented only by particles
+      message.remove();
+
+      // spawn each letter as a particle with a small stagger
+      chars.forEach((ch, i) => {
+        const delay = i * 30 + Math.random() * 120; // stagger
+        setTimeout(() => {
+          // choose small size for these letters but slightly larger than stream letters
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          const size = Math.max(12, Math.min(26, (Math.min(vw, vh) / 60) * (0.9 + Math.random() * 0.6)));
+          // initial velocities biased rightwards, with some vertical component
+          const baseVX = lerp(config.vxMin, config.vxMax, 0.7) * (0.9 + Math.random() * 0.5);
+          const vx = baseVX * (0.9 + Math.random() * 0.6);
+          const vy = (Math.random() * 2 - 1) * 40;
+          const life = randomRange(config.particleLifeMin * 0.8, config.particleLifeMax * 1.1);
+          const hue = (200 + Math.random() * 160) % 360;
+          // if character is a space, spawn a faint tiny glyph from LETTERS
+          const c = (ch === ' ') ? LETTERS[Math.floor(Math.random() * LETTERS.length)] : ch;
+          spawnParticle(centerX + (Math.random()-0.5)*rect.width, centerY + (Math.random()-0.5)*rect.height, vx, vy, life, c, size, hue);
+        }, delay);
       });
     }
 
@@ -223,34 +286,29 @@
       const spawnRate = lerp(config.spawnRateMin, config.spawnRateMax, easeOutCubic(t));
       const vxBase = lerp(config.vxMin, config.vxMax, easeOutCubic(t));
 
-      // adjust number of streams gradually
-      const targetStreams = Math.max(config.streamsMin, Math.min(40, Math.round(vh * config.streamsMaxPerHeight * (0.8 + t))));
+      // adjust number of streams gradually (kept conservative)
+      const targetStreams = Math.max(config.streamsMin, Math.min(24, Math.round(vh * config.streamsMaxPerHeight * (0.9 + t))));
       if (streams.length < targetStreams) {
-        // add one new stream every 200ms of ramp
-        if (Math.random() < 0.18) {
-          const y = Math.random() * vh;
-          streams.push(createStream(y));
-        }
+        if (Math.random() < 0.12) streams.push(createStream(Math.random() * vh));
       } else if (streams.length > targetStreams) {
         streams.splice(0, streams.length - targetStreams);
       }
 
       // distribute spawnRate across streams but allow some random stray particles
-      const spawnFromStreams = spawnRate * 0.86;
+      const spawnFromStreams = spawnRate * 0.82;
       const strayRate = spawnRate - spawnFromStreams;
 
       // accumulate and emit stray particles
       spawnAccumulator += (strayRate * dt / 1000);
       while (spawnAccumulator >= 1) {
         spawnAccumulator -= 1;
-        // stray particle: random y, start slightly left
         const y = Math.random() * vh;
         const xStart = -20 - Math.random() * 80;
-        const vx = vxBase * (0.7 + Math.random() * 0.9);
-        const vy = (Math.random() * 2 - 1) * 30;
-        const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.7 + Math.random()*0.8);
+        const vx = vxBase * (0.7 + Math.random() * 0.8);
+        const vy = (Math.random() * 2 - 1) * 24;
+        const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.8 + Math.random()*0.8);
         const ch = LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
-        const size = Math.max(9, Math.min(20, (Math.min(vw, vh) / 60) * (0.6 + Math.random())));
+        const size = Math.max(8, Math.min(16, (Math.min(vw, vh) / 70) * (0.6 + Math.random())));
         const hue = (200 + Math.random() * 160) % 360;
         spawnParticle(xStart, y, vx, vy, life, ch, size, hue);
       }
@@ -260,24 +318,23 @@
       for (let si = 0; si < streams.length; si++) {
         const s = streams[si];
         s.acc += perStreamRate * dt / 1000;
-        // occasionally adjust y a bit to mimic rising currents
-        s.y += Math.sin((now + si*1234) * 0.0003 + s.phase) * 0.12;
+        // gently drift vertical position to simulate different currents
+        s.y += Math.sin((now + si*1009) * 0.00026 + s.phase) * 0.08;
         if (Math.random() < 0.002) {
-          s.y += (Math.random() - 0.5) * 40;
+          s.y += (Math.random() - 0.5) * 36;
           s.phase = Math.random() * Math.PI * 2;
         }
         while (s.acc >= 1) {
           s.acc -= 1;
-          const yJitter = (Math.random() - 0.5) * 18;
-          const y = clamp(s.y + yJitter, 10, vh - 10);
-          const xStart = s.xOffset - (Math.random() * 20);
-          const vx = vxBase * s.speedMul * (0.8 + Math.random() * 0.8);
-          // vertical velocity small; flutter as sine will add movement
-          const vy = (Math.random() * 2 - 1) * 26;
-          const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.6 + Math.random()*1.2);
+          const yJitter = (Math.random() - 0.5) * 14;
+          const y = clamp(s.y + yJitter, 8, vh - 8);
+          const xStart = s.xOffset - (Math.random() * 18);
+          const vx = vxBase * s.speedMul * (0.85 + Math.random() * 0.5);
+          const vy = (Math.random() * 2 - 1) * 18;
+          const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.8 + Math.random()*1.0);
           const ch = LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
-          const size = Math.max(8, Math.min(16, (Math.min(vw, vh) / 80) * (0.6 + Math.random())));
-          const hue = (200 + si * 12 + Math.random() * 40) % 360;
+          const size = Math.max(7, Math.min(14, (Math.min(vw, vh) / 90) * (0.6 + Math.random())));
+          const hue = (200 + si * 10 + Math.random() * 36) % 360;
           spawnParticle(xStart, y, vx, vy, life, ch, size, hue);
         }
       }
@@ -286,7 +343,7 @@
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         const age = now - p.birth;
-        if (age > p.life || p.x > vw + 60 || p.y < -80 || p.y > vh + 80) {
+        if (age > p.life || p.x > vw + 80 || p.y < -120 || p.y > vh + 120) {
           p.el.remove();
           particles.splice(i, 1);
           continue;
@@ -294,22 +351,20 @@
         // horizontal movement
         p.x += p.vx * (dt / 1000);
         // vertical movement plus fluttering to mimic leaves
-        const flutter = Math.sin((now + i * 137) * 0.003 + i) * (config.verticalJitter * (0.2 + Math.sin(i) * 0.3));
+        const flutter = Math.sin((now * 0.003) + i) * (config.verticalJitter * (0.2 + Math.sin(i)*0.2));
         p.y += p.vy * (dt / 1000) + flutter * (dt / 1000);
 
         // slight rotation based on vx and flutter
-        const rot = (Math.sin((p.x + p.y) * 0.002 + i) * 25) * (p.vx / (vxBase + 0.001));
+        const rot = (Math.sin((p.x + p.y) * 0.002 + i) * 24) * (p.vx / (vxBase + 0.001));
 
-        // opacity fades out towards end of life, also thin trailing feel
+        // opacity fades out towards end of life
         const lifeProgress = age / p.life;
         const opacity = Math.max(0, 1 - lifeProgress);
-        const scale = 0.85 + (1 - lifeProgress) * 0.6;
+        const scale = 0.82 + (1 - lifeProgress) * 0.5;
 
-        // position and transform
         p.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%) rotate(${rot}deg) scale(${scale})`;
-        p.el.style.opacity = Math.max(0.05, opacity).toFixed(3);
-        // slight blur for depth
-        p.el.style.filter = `blur(${Math.min(2.2, lifeProgress * 2)}px)`;
+        p.el.style.opacity = Math.max(0.04, opacity).toFixed(3);
+        p.el.style.filter = `blur(${Math.min(1.8, lifeProgress * 2)}px)`;
       }
 
       // schedule next frame if animating
@@ -339,13 +394,12 @@
       clearTimeout(resizeTO);
       resizeTO = setTimeout(() => {
         if (animating) {
-          // keep current particles but add/remove streams based on new height
           const vh = window.innerHeight;
-          const targetStreams = Math.max(config.streamsMin, Math.min(40, Math.round(vh * config.streamsMaxPerHeight)));
+          const targetStreams = Math.max(config.streamsMin, Math.min(24, Math.round(vh * config.streamsMaxPerHeight)));
           while (streams.length < targetStreams) streams.push(createStream(Math.random() * vh));
           while (streams.length > targetStreams) streams.pop();
         }
-      }, 240);
+      }, 220);
       resetIdle();
     });
 

@@ -25,28 +25,6 @@
       -moz-osx-font-smoothing:grayscale;
     }
 
-    /* Hello World placeholder center (letters will be exploded into big-letter elements) */
-    #message{
-      position:fixed;
-      left:50%;
-      top:50%;
-      transform:translate(-50%,-50%);
-      font-family: 'IBM Plex Mono', monospace;
-      font-size:clamp(28px,6vw,84px);
-      letter-spacing:0.04em;
-      font-weight:600;
-      color:var(--fg);
-      text-align:center;
-      z-index:3;
-      pointer-events:none;
-      transition:opacity 0.8s ease, transform 0.8s ease;
-      text-shadow:
-        0 6px 20px rgba(2,3,9,0.7),
-        0 1px 0 rgba(255,255,255,0.02);
-      white-space:nowrap;
-      will-change:transform, opacity;
-    }
-
     /* large independent letters */
     .big-letter{
       position:fixed;
@@ -104,12 +82,13 @@
   </style>
 </head>
 <body>
-  <div id="message">Hello World</div>
+  <!-- Center message removed on purpose (letters will be created and animated independently) -->
   <div class="vignette" aria-hidden="true"></div>
 
   <script>
   (function () {
-    // Allowed letters for small particles (lowercase)
+    // Text used for big letters and for particle letters (small)
+    const TEXT = 'Hello World';
     const LETTERS = 'helloworld';
 
     // Performance-minded config and runtime state
@@ -118,7 +97,6 @@
     let animating = false;
     let rafId = null;
 
-    let message = document.getElementById('message');
     const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduced) return;
 
@@ -244,65 +222,75 @@
       el.textContent = ch;
       el.style.fontSize = `${size}px`;
       el.style.zIndex = 2 + Math.floor(Math.random() * 20);
-      // HSL string kept simple; opacity handled separately
       el.style.color = `hsl(${colorHue} ${56 + Math.random()*18}% ${56 + Math.random()*8}%)`;
-
-      // initialize transform using translate3d for GPU acceleration
       el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%,-50%) rotate(0deg) scale(1)`;
       el.style.opacity = '0.98';
-
-      // append once — reuse element avoids reflows in future frames
       document.body.appendChild(el);
-
       particles.push({ el, x, y, vx, vy, birth: performance.now(), life, size });
     }
 
-    // Create big letters from the message and put them into bigLetters (single use but reused on stop/start)
+    // Create big letters from TEXT, positioned centered and then animated individually.
     let messageExploded = false;
-    function explodeMessageIntoBigLetters(){
-      if (messageExploded || !message) return;
+    function explodeTextIntoBigLetters(){
+      if (messageExploded) return;
       messageExploded = true;
-      // create a hidden wrapper to measure characters precisely
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      // emulate the CSS clamp(28px, 6vw, 84px)
+      const fontSize = Math.round(Math.max(28, Math.min(84, vw * 0.06)));
+
+      // create hidden measurement wrapper
       const wrapper = document.createElement('div');
       wrapper.style.position = 'fixed';
       wrapper.style.left = '-9999px';
       wrapper.style.top = '-9999px';
-      wrapper.style.fontFamily = getComputedStyle(message).fontFamily;
-      wrapper.style.fontSize = getComputedStyle(message).fontSize;
-      wrapper.style.fontWeight = getComputedStyle(message).fontWeight;
+      wrapper.style.fontFamily = "'IBM Plex Mono', monospace";
+      wrapper.style.fontSize = `${fontSize}px`;
+      wrapper.style.fontWeight = '600';
       wrapper.style.whiteSpace = 'pre';
-      wrapper.style.letterSpacing = getComputedStyle(message).letterSpacing;
+      wrapper.style.letterSpacing = '0.04em';
       wrapper.style.visibility = 'hidden';
-      wrapper.textContent = message.textContent || '';
+      wrapper.textContent = TEXT;
       document.body.appendChild(wrapper);
 
-      // create per-character spans for measurement
-      const chars = [];
+      // build per-character spans to measure widths
+      const spans = [];
       wrapper.innerHTML = '';
-      const text = message.textContent || '';
-      for (let ch of text) {
-        const span = document.createElement('span');
-        span.textContent = ch;
-        span.style.display = 'inline-block';
-        wrapper.appendChild(span);
-        chars.push(span);
+      for (const ch of TEXT) {
+        const s = document.createElement('span');
+        s.textContent = ch;
+        s.style.display = 'inline-block';
+        wrapper.appendChild(s);
+        spans.push({ span: s, ch });
       }
-      const rects = chars.map(sp => sp.getBoundingClientRect());
-      message.remove();
-      wrapper.remove();
 
+      const rects = spans.map(s => s.span.getBoundingClientRect());
+      // compute total width
+      const totalWidth = rects.reduce((sum, r) => sum + r.width, 0);
+      const centerX = vw / 2;
+      const centerY = vh / 2;
+      const startX = centerX - totalWidth / 2;
+
+      // create big letters at measured centers
       const now = performance.now();
+      let acc = 0;
       for (let i = 0; i < rects.length; i++) {
         const r = rects[i];
-        const ch = text[i];
-        if (ch === ' ') continue;
+        const ch = spans[i].ch;
+        acc += r.width;
+        if (ch === ' ') {
+          // skip creating element; keep spacing by advancing acc
+          continue;
+        }
+        // center of this char
+        const cx = startX + acc - (r.width / 2);
+        const cy = centerY;
         const el = document.createElement('div');
         el.className = 'big-letter';
         el.textContent = ch;
-        const size = Math.max(22, Math.round(r.height || parseFloat(getComputedStyle(document.documentElement).fontSize || 48)));
+        const size = Math.max(22, Math.round(r.height || fontSize));
         el.style.fontSize = `${size}px`;
-        const cx = r.left + r.width / 2;
-        const cy = r.top + r.height / 2;
         el.style.transform = `translate3d(${cx}px, ${cy}px, 0) translate(-50%,-50%) rotate(0deg) scale(1)`;
         el.style.opacity = '1';
         document.body.appendChild(el);
@@ -312,6 +300,9 @@
         const life = randomRange(config.bigLifeMin, config.bigLifeMax);
         bigLetters.push({ el, x: cx, y: cy, vx, vy, birth: now, life, size });
       }
+
+      // cleanup wrapper
+      wrapper.remove();
     }
 
     function startAnimation(){
@@ -324,7 +315,7 @@
       streams.length = 0;
       spawnAccumulator = 0;
       initStreams(2);
-      explodeMessageIntoBigLetters();
+      explodeTextIntoBigLetters();
       rafId = requestAnimationFrame(frame);
     }
 
@@ -332,40 +323,15 @@
       animating = false;
       if (rafId) cancelAnimationFrame(rafId);
       rafId = null;
-      // hide and pool particle elements
-      for (let p of particles) {
-        releaseParticleElement(p.el);
-      }
+      for (let p of particles) releaseParticleElement(p.el);
       particles.length = 0;
-      // remove big letters from DOM
       for (let b of bigLetters) b.el.remove();
       bigLetters.length = 0;
       streams.length = 0;
-      // restore original message if missing
-      if (!document.getElementById('message')) {
-        const m = document.createElement('div');
-        m.id = 'message';
-        m.textContent = 'Hello World';
-        m.style.position = 'fixed';
-        m.style.left = '50%';
-        m.style.top = '50%';
-        m.style.transform = 'translate(-50%,-50%)';
-        m.style.fontFamily = "'IBM Plex Mono', monospace";
-        m.style.fontSize = 'clamp(28px,6vw,84px)';
-        m.style.letterSpacing = '0.04em';
-        m.style.fontWeight = '600';
-        m.style.color = 'var(--fg)';
-        m.style.textAlign = 'center';
-        m.style.zIndex = '3';
-        m.style.pointerEvents = 'none';
-        m.style.textShadow = '0 6px 20px rgba(2,3,9,0.7), 0 1px 0 rgba(255,255,255,0.02)';
-        document.body.appendChild(m);
-        message = m;
-      }
       messageExploded = false;
     }
 
-    // Main frame: update big letters (wrap-around) and small particles. Keep operations minimal per element.
+    // Main frame: update big letters (wrap-around) and small particles.
     function frame(now) {
       const dt = Math.min(40, now - lastTime);
       lastTime = now;
@@ -373,7 +339,7 @@
       const vw = window.innerWidth;
       const vh = window.innerHeight;
 
-      // update big letters (slow, wrap horizontally)
+      // big letters
       if (bigLetters.length) {
         const t = Math.min(1, elapsed / (rampDuration * 1.5));
         const speedMul = lerp(0.5, 1.0, easeOutCubic(t));
@@ -396,13 +362,12 @@
           const opacity = 0.64 + (1 - lifeProgress) * 0.36;
           const scale = 0.92 + (1 - lifeProgress) * 0.22;
 
-          // Use translate3d to ensure GPU compositing
           b.el.style.transform = `translate3d(${Math.round(b.x)}px, ${Math.round(b.y)}px, 0) translate(-50%,-50%) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
           b.el.style.opacity = opacity.toFixed(3);
         }
       }
 
-      // small particles spawning (conservative)
+      // small particles
       const tRamp = Math.min(1, elapsed / rampDuration);
       const spawnRate = lerp(config.spawnRateMin, config.spawnRateMax, easeOutCubic(tRamp));
       const vxBase = lerp(config.vxMin, config.vxMax, easeOutCubic(tRamp));
@@ -454,12 +419,11 @@
         }
       }
 
-      // update particles (avoid heavy ops like filter; only transform + opacity)
+      // update particles (minimal per-frame work)
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         const age = now - p.birth;
         if (age > p.life || p.x > vw + 80 || p.y < -120 || p.y > vh + 120) {
-          // hide and pool element instead of removing
           releaseParticleElement(p.el);
           particles.splice(i, 1);
           continue;
@@ -517,13 +481,18 @@
     // Public API for debug/control
     window.__whirl = { start: startAnimation, stop: stopAnimation, scheduleIdle };
 
-    // Expose a little warm-up to ensure fonts are loaded
-    // (this reduces jank when text first appears)
+    // warm-up to reduce jank when fonts load
     window.addEventListener('load', () => {
-      // small timeout to allow font settle
       setTimeout(() => {
-        // touch the message's layout once
-        if (message) message.getBoundingClientRect();
+        // touch a layout measurement so fonts are ready
+        const el = document.createElement('span');
+        el.style.fontFamily = "'IBM Plex Mono', monospace";
+        el.style.fontSize = '16px';
+        el.style.visibility = 'hidden';
+        el.textContent = '.';
+        document.body.appendChild(el);
+        el.getBoundingClientRect();
+        el.remove();
       }, 200);
     });
   })();

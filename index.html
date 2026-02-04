@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Hello World — Whirlwind</title>
+  <title>hello.avner.world.sorek.github.io</title>
 
   <!-- IBM Plex Mono -->
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600&display=swap" rel="stylesheet">
@@ -23,7 +23,7 @@
       overflow:hidden;
     }
 
-    /* centered Hello World in Plex Mono (will be broken into letters when animation starts) */
+    /* Hello World — large centered message (flies away as a single large element) */
     #message{
       position:fixed;
       left:50%;
@@ -81,112 +81,130 @@
 
   <script>
   (function () {
-    // Lowercase letters allowed (words "hello world")
+    // Allowed letters from "hello world"
     const LETTERS = 'helloworld';
-    const idleDelay = 5000;     // ms before auto-start
-    const rampDuration = 10000; // ms to go from slow to full speed
+
+    // Base ramp and spawn config
+    const rampDuration = 10000; // ms to ramp to full speed
     let idleTimer = null;
     let animating = false;
     let rafId = null;
 
-    const message = document.getElementById('message');
+    let message = document.getElementById('message');
 
-    // Respect reduced motion preference
+    // Respect reduced motion
     const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduced) {
-      // keep simple message visible and do nothing else
-      return;
+    if (reduced) return;
+
+    // Mouse movement tracking (to influence idle wait)
+    const mouseSamples = []; // {x,y,t}
+    const sampleWindow = 600; // ms window to compute speed
+    const maxConsideredSpeed = 1200; // px/s maps to top of delay range
+
+    // Delay range (ms) when deciding when to start animation based on movement
+    const minDelay = 1200;
+    const maxDelay = 7000;
+
+    // Activity events: we track movement for delay but do NOT stop animation once started
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'touchmove'];
+    activityEvents.forEach(e => window.addEventListener(e, onActivity, { passive: true }));
+
+    // Also keep an explicit mousemove listener to capture fine-grained speed (including touchmove above)
+    window.addEventListener('mousemove', captureMouse, { passive: true });
+    window.addEventListener('touchmove', captureTouch, { passive: true });
+
+    // initial schedule
+    scheduleIdle();
+
+    function captureMouse(ev) {
+      const t = performance.now();
+      mouseSamples.push({ x: ev.clientX, y: ev.clientY, t });
+      pruneSamples(t);
     }
 
-    // Interaction resets idle and stops animation
-    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
-    activityEvents.forEach(e => window.addEventListener(e, resetIdle, { passive: true }));
-
-    resetIdle();
-
-    function resetIdle(){
-      if (idleTimer) clearTimeout(idleTimer);
-      if (animating) stopAnimation();
-      idleTimer = setTimeout(() => startAnimation(), idleDelay);
-    }
-
-    function startAnimation(){
-      animating = true;
-      lastTime = performance.now();
-      startTime = lastTime;
-      particles = [];
-      streams = [];
-      spawnAccumulator = 0;
-
-      // Reduced initial streams for performance
-      initStreams(2);
-
-      // Break the central message into letters that become particles ("fly away")
-      explodeMessage();
-
-      rafId = requestAnimationFrame(frame);
-    }
-
-    function stopAnimation(){
-      animating = false;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = null;
-      // remove DOM nodes
-      particles.forEach(p => p.el.remove());
-      particles = [];
-      streams = [];
-      // restore message if it was removed
-      if (!document.body.contains(message)) {
-        // recreate message node for a static fallback
-        const m = document.createElement('div');
-        m.id = 'message';
-        m.textContent = 'Hello World';
-        m.style.position = 'fixed';
-        m.style.left = '50%';
-        m.style.top = '50%';
-        m.style.transform = 'translate(-50%,-50%)';
-        m.style.fontFamily = "'IBM Plex Mono', monospace";
-        m.style.fontSize = 'clamp(28px,6vw,84px)';
-        m.style.letterSpacing = '0.04em';
-        m.style.fontWeight = '600';
-        m.style.color = 'var(--fg)';
-        m.style.textAlign = 'center';
-        m.style.zIndex = '3';
-        m.style.pointerEvents = 'none';
-        m.style.textShadow = '0 6px 20px rgba(2,3,9,0.7), 0 1px 0 rgba(255,255,255,0.02)';
-        document.body.appendChild(m);
+    function captureTouch(ev) {
+      const t = performance.now();
+      if (ev.touches && ev.touches[0]) {
+        mouseSamples.push({ x: ev.touches[0].clientX, y: ev.touches[0].clientY, t });
+        pruneSamples(t);
       }
     }
 
-    // Particles currently on screen
+    function pruneSamples(now) {
+      while (mouseSamples.length > 0 && now - mouseSamples[0].t > sampleWindow) mouseSamples.shift();
+      // also keep sample array length reasonable
+      if (mouseSamples.length > 30) mouseSamples.splice(0, mouseSamples.length - 30);
+    }
+
+    function computeAvgSpeed() {
+      if (mouseSamples.length < 2) return 0;
+      const first = mouseSamples[0];
+      const last = mouseSamples[mouseSamples.length - 1];
+      const dt = (last.t - first.t) / 1000; // seconds
+      if (dt <= 0) return 0;
+      let dist = 0;
+      for (let i = 1; i < mouseSamples.length; i++) {
+        const a = mouseSamples[i - 1];
+        const b = mouseSamples[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        dist += Math.hypot(dx, dy);
+      }
+      const speed = dist / dt; // px/s
+      return speed;
+    }
+
+    // When user activity happens, we reschedule the idle timer based on current movement.
+    // IMPORTANT: do NOT stop the animation if it's already running.
+    function onActivity(ev) {
+      // capture movement from non-mouse events quickly
+      if (ev.type === 'mousedown' && ev.clientX != null) {
+        const t = performance.now();
+        mouseSamples.push({ x: ev.clientX, y: ev.clientY, t });
+        pruneSamples(t);
+      }
+      scheduleIdle();
+    }
+
+    function scheduleIdle() {
+      if (idleTimer) clearTimeout(idleTimer);
+      // compute speed and map to delay
+      const speed = computeAvgSpeed();
+      const speedNorm = Math.min(1, Math.max(0, speed / maxConsideredSpeed)); // 0..1
+      const mappedDelay = Math.round(lerp(minDelay, maxDelay, speedNorm));
+      // If animation already started, do not clear it later on activity — we only use the timer to start once.
+      if (!animating) {
+        idleTimer = setTimeout(() => {
+          startAnimation();
+        }, mappedDelay);
+      }
+    }
+
+    // Core animation state
     let particles = [];
-    // Streams that emit letters (horizontal "columns" moving left->right)
     let streams = [];
-    // Accumulators
     let spawnAccumulator = 0;
     let startTime = 0;
     let lastTime = 0;
 
-    // Config: toned-down numbers for improved performance
     const config = {
-      spawnRateMin: 3,        // letters/sec at start (global) - reduced
-      spawnRateMax: 120,      // letters/sec at full speed - reduced
+      spawnRateMin: 3,
+      spawnRateMax: 120,
       streamsMin: 2,
-      streamsMaxPerHeight: 0.012, // fewer streams per height
-      particleLifeMin: 2400,  // ms
-      particleLifeMax: 7000,  // ms
-      vxMin: 60,              // px/s at start
-      vxMax: 520,             // px/s at top speed
-      verticalJitter: 28,     // px amplitude for leaf-like flutter
-      maxParticles: 800,      // reduced ceiling
+      streamsMaxPerHeight: 0.012,
+      particleLifeMin: 2400,
+      particleLifeMax: 7000,
+      vxMin: 60,
+      vxMax: 520,
+      verticalJitter: 28,
+      maxParticles: 600, // further reduced for performance
     };
 
     function initStreams(count) {
       streams = [];
       const vh = window.innerHeight;
       for (let i = 0; i < count; i++) {
-        const y = Math.random() * vh;
-        streams.push(createStream(y));
+        streams.push(createStream(Math.random() * vh));
       }
     }
 
@@ -194,13 +212,12 @@
       return {
         y,
         phase: Math.random() * Math.PI * 2,
-        xOffset: -10 - Math.random() * 60,
+        xOffset: -12 - Math.random() * 40,
         speedMul: 0.8 + Math.random() * 0.7,
         acc: 0
       };
     }
 
-    // Spawn a particle at (x,y) moving rightwards
     function spawnParticle(x, y, vx, vy, life, ch, size, colorHue) {
       if (particles.length > config.maxParticles) return;
       const el = document.createElement('span');
@@ -224,81 +241,112 @@
       });
     }
 
-    // When animation starts, break the centered message into letters that fly away
-    function explodeMessage() {
+    // Animate the central large message flying away (single large object).
+    let _messageOriginal = null;
+    let messageHasFlown = false;
+    function animateMessageFly(){
+      if (!message || messageHasFlown) return;
+      messageHasFlown = true;
+      _messageOriginal = {
+        transform: message.style.transform || '',
+        transition: message.style.transition || '',
+        opacity: message.style.opacity || '',
+        left: message.style.left || '',
+        top: message.style.top || '',
+        zIndex: message.style.zIndex || ''
+      };
+
+      message.style.transition = 'transform 2200ms cubic-bezier(.22,1,.36,1), opacity 1200ms ease';
+      message.style.willChange = 'transform, opacity';
+      void message.offsetWidth;
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const finalX = Math.round(vw * (1.12 + Math.random() * 0.2));
+      const finalY = Math.round((Math.random() - 0.5) * vh * 0.5);
+      const angle = (Math.random() * 30 + 6) * (Math.random() < 0.5 ? -1 : 1);
+      const finalScale = 0.95 + Math.random() * 0.12;
+
+      setTimeout(() => {
+        message.style.transform = `translate(${finalX}px, ${finalY}px) translate(-50%,-50%) rotate(${angle}deg) scale(${finalScale})`;
+        message.style.opacity = '0.95';
+      }, 16);
+
+      // subtle continued drift after the main flight so it visually continues with the whirlwind
+      setTimeout(() => {
+        message.style.transition = 'transform 7000ms linear, opacity 3000ms linear';
+        const extraX = Math.round(vw * 0.35);
+        const extraY = finalY * 0.6;
+        message.style.transform = `translate(${finalX + extraX}px, ${finalY + extraY}px) translate(-50%,-50%) rotate(${angle*1.2}deg) scale(${finalScale*0.96})`;
+        message.style.opacity = '0.88';
+      }, 2600);
+    }
+
+    function startAnimation(){
+      if (animating) return; // already running
+      animating = true;
+      lastTime = performance.now();
+      startTime = lastTime;
+      particles = [];
+      streams = [];
+      spawnAccumulator = 0;
+
+      initStreams(2);
+      animateMessageFly();
+      rafId = requestAnimationFrame(frame);
+    }
+
+    // We no longer stop animation on user interaction; it loops indefinitely until explicitly stopped.
+    function stopAnimation(){
+      animating = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+      particles.forEach(p => p.el.remove());
+      particles = [];
+      streams = [];
+      restoreMessage();
+    }
+
+    function restoreMessage(){
+      // Try to restore original inline styles if needed
+      message = document.getElementById('message');
       if (!message) return;
-      const rect = message.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-
-      // take visible characters from message, keep case but only use letters from allowed set
-      const text = message.textContent || '';
-      let chars = [];
-      for (let ch of text) {
-        const low = ch.toLowerCase();
-        if (low === ' ') {
-          // create a small gap particle occasionally for a natural look (optional)
-          if (Math.random() < 0.2) chars.push(' ');
-          else chars.push(' ');
-          continue;
-        }
-        // map any character to nearest allowed letter (for consistency use allowed letters)
-        if (LETTERS.includes(low)) chars.push(low);
-        else chars.push(LETTERS[Math.floor(Math.random() * LETTERS.length)]);
-      }
-
-      // Remove the message element so letters are represented only by particles
-      message.remove();
-
-      // spawn each letter as a particle with a small stagger
-      chars.forEach((ch, i) => {
-        const delay = i * 30 + Math.random() * 120; // stagger
+      if (_messageOriginal) {
+        message.style.transition = 'none';
+        void message.offsetWidth;
+        message.style.transform = _messageOriginal.transform || 'translate(-50%,-50%)';
+        message.style.left = _messageOriginal.left || '50%';
+        message.style.top = _messageOriginal.top || '50%';
+        message.style.opacity = _messageOriginal.opacity || '';
+        message.style.zIndex = _messageOriginal.zIndex || '';
         setTimeout(() => {
-          // choose small size for these letters but slightly larger than stream letters
-          const vw = window.innerWidth;
-          const vh = window.innerHeight;
-          const size = Math.max(12, Math.min(26, (Math.min(vw, vh) / 60) * (0.9 + Math.random() * 0.6)));
-          // initial velocities biased rightwards, with some vertical component
-          const baseVX = lerp(config.vxMin, config.vxMax, 0.7) * (0.9 + Math.random() * 0.5);
-          const vx = baseVX * (0.9 + Math.random() * 0.6);
-          const vy = (Math.random() * 2 - 1) * 40;
-          const life = randomRange(config.particleLifeMin * 0.8, config.particleLifeMax * 1.1);
-          const hue = (200 + Math.random() * 160) % 360;
-          // if character is a space, spawn a faint tiny glyph from LETTERS
-          const c = (ch === ' ') ? LETTERS[Math.floor(Math.random() * LETTERS.length)] : ch;
-          spawnParticle(centerX + (Math.random()-0.5)*rect.width, centerY + (Math.random()-0.5)*rect.height, vx, vy, life, c, size, hue);
-        }, delay);
-      });
+          message.style.transition = _messageOriginal.transition || 'opacity 0.8s ease, transform 0.8s ease';
+        }, 20);
+      }
     }
 
     // Frame loop
     function frame(now) {
-      const dt = Math.min(40, now - lastTime); // clamp to avoid jumps
+      const dt = Math.min(40, now - lastTime);
       lastTime = now;
       const elapsed = now - startTime;
       const vw = window.innerWidth;
       const vh = window.innerHeight;
 
-      // Ramp factor (0 -> 1)
       const t = Math.min(1, elapsed / rampDuration);
-
-      // compute current global spawn rate and speed based on ramp
       const spawnRate = lerp(config.spawnRateMin, config.spawnRateMax, easeOutCubic(t));
       const vxBase = lerp(config.vxMin, config.vxMax, easeOutCubic(t));
 
-      // adjust number of streams gradually (kept conservative)
-      const targetStreams = Math.max(config.streamsMin, Math.min(24, Math.round(vh * config.streamsMaxPerHeight * (0.9 + t))));
+      const targetStreams = Math.max(config.streamsMin, Math.min(18, Math.round(vh * config.streamsMaxPerHeight * (0.9 + t))));
       if (streams.length < targetStreams) {
         if (Math.random() < 0.12) streams.push(createStream(Math.random() * vh));
       } else if (streams.length > targetStreams) {
         streams.splice(0, streams.length - targetStreams);
       }
 
-      // distribute spawnRate across streams but allow some random stray particles
       const spawnFromStreams = spawnRate * 0.82;
       const strayRate = spawnRate - spawnFromStreams;
 
-      // accumulate and emit stray particles
       spawnAccumulator += (strayRate * dt / 1000);
       while (spawnAccumulator >= 1) {
         spawnAccumulator -= 1;
@@ -308,17 +356,15 @@
         const vy = (Math.random() * 2 - 1) * 24;
         const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.8 + Math.random()*0.8);
         const ch = LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
-        const size = Math.max(8, Math.min(16, (Math.min(vw, vh) / 70) * (0.6 + Math.random())));
+        const size = Math.max(8, Math.min(14, (Math.min(vw, vh) / 80) * (0.6 + Math.random())));
         const hue = (200 + Math.random() * 160) % 360;
         spawnParticle(xStart, y, vx, vy, life, ch, size, hue);
       }
 
-      // each stream emits according to spawnFromStreams / streams.length
       const perStreamRate = spawnFromStreams / Math.max(1, streams.length);
       for (let si = 0; si < streams.length; si++) {
         const s = streams[si];
         s.acc += perStreamRate * dt / 1000;
-        // gently drift vertical position to simulate different currents
         s.y += Math.sin((now + si*1009) * 0.00026 + s.phase) * 0.08;
         if (Math.random() < 0.002) {
           s.y += (Math.random() - 0.5) * 36;
@@ -333,7 +379,7 @@
           const vy = (Math.random() * 2 - 1) * 18;
           const life = randomRange(config.particleLifeMin, config.particleLifeMax) * (0.8 + Math.random()*1.0);
           const ch = LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
-          const size = Math.max(7, Math.min(14, (Math.min(vw, vh) / 90) * (0.6 + Math.random())));
+          const size = Math.max(7, Math.min(12, (Math.min(vw, vh) / 100) * (0.6 + Math.random())));
           const hue = (200 + si * 10 + Math.random() * 36) % 360;
           spawnParticle(xStart, y, vx, vy, life, ch, size, hue);
         }
@@ -348,36 +394,28 @@
           particles.splice(i, 1);
           continue;
         }
-        // horizontal movement
         p.x += p.vx * (dt / 1000);
-        // vertical movement plus fluttering to mimic leaves
         const flutter = Math.sin((now * 0.003) + i) * (config.verticalJitter * (0.2 + Math.sin(i)*0.2));
         p.y += p.vy * (dt / 1000) + flutter * (dt / 1000);
-
-        // slight rotation based on vx and flutter
         const rot = (Math.sin((p.x + p.y) * 0.002 + i) * 24) * (p.vx / (vxBase + 0.001));
-
-        // opacity fades out towards end of life
         const lifeProgress = age / p.life;
         const opacity = Math.max(0, 1 - lifeProgress);
         const scale = 0.82 + (1 - lifeProgress) * 0.5;
-
         p.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%) rotate(${rot}deg) scale(${scale})`;
         p.el.style.opacity = Math.max(0.04, opacity).toFixed(3);
-        p.el.style.filter = `blur(${Math.min(1.8, lifeProgress * 2)}px)`;
+        p.el.style.filter = `blur(${Math.min(1.6, lifeProgress * 2)}px)`;
       }
 
-      // schedule next frame if animating
       if (animating) rafId = requestAnimationFrame(frame);
     }
 
-    // helpers
+    // Helpers
     function lerp(a, b, t) { return a + (b - a) * t; }
     function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
     function randomRange(a, b) { return a + Math.random() * (b - a); }
     function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
 
-    // Pause/resume on visibility change for efficiency
+    // Pause/resume on visibility change
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         if (rafId) cancelAnimationFrame(rafId);
@@ -388,31 +426,31 @@
       }
     });
 
-    // Rebuild streams on resize to keep density correct
+    // Rebuild streams on resize
     let resizeTO;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTO);
       resizeTO = setTimeout(() => {
         if (animating) {
           const vh = window.innerHeight;
-          const targetStreams = Math.max(config.streamsMin, Math.min(24, Math.round(vh * config.streamsMaxPerHeight)));
+          const targetStreams = Math.max(config.streamsMin, Math.min(18, Math.round(vh * config.streamsMaxPerHeight)));
           while (streams.length < targetStreams) streams.push(createStream(Math.random() * vh));
           while (streams.length > targetStreams) streams.pop();
         }
       }, 220);
-      resetIdle();
+      scheduleIdle();
     });
 
-    // cleanup
+    // Cleanup on pagehide
     window.addEventListener('pagehide', () => {
       if (rafId) cancelAnimationFrame(rafId);
     });
 
-    // Expose control for debugging
+    // Expose control
     window.__whirl = {
       start: startAnimation,
       stop: stopAnimation,
-      resetIdle
+      scheduleIdle
     };
   })();
   </script>
